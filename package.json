@@ -1,14 +1,14 @@
 {
-  "name": "@chhoumann/bunnai",
+  "name": "@fcolor04/bunnai",
   "description": "let ai write commit messages for you",
-  "version": "1.3.9",
+  "version": "1.4.1",
   "author": "Christian Bager Bach Houmann <christian@bagerbach.com>",
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/chhoumann/bunnai"
+    "url": "https://github.com/fcolor04/bunnai"
   },
   "main": "dist/index.js",
   "devDependencies": {
@@ -21,18 +21,18 @@
   "bin": {
     "bunnai": "bin/bunnai.js"
   },
-  "bugs": "https://github.com/chhoumann/bunnai/issues",
+  "bugs": "https://github.com/fcolor04/bunnai/issues",
   "files": [
     "dist",
     "bin"
   ],
-  "homepage": "https://bagerbach.com",
+  "homepage": "https://github.com/fcolor04/bunnai",
   "license": "MIT",
   "scripts": {
     "start": "bun run src/index.ts",
     "build": "bun run build.mjs",
     "prepublishOnly": "bun run build",
-    "release": "bumpp && npm publish",
+    "release": "bumpp && bun publish",
     "lint": "biome check src",
     "lint:fix": "biome format src --write"
   },
