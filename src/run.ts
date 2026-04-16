@@ -224,8 +224,8 @@ export async function run(options: RunOptions, templateName?: string) {
 	if (!apiKey) {
 		console.error(
 			provider === "openrouter"
-				? "OPENROUTER_API_KEY is not set"
-				: "OPENAI_API_KEY is not set",
+				? "OPENROUTER_API_KEY is not set. Run `bunnai config` and set Provider to openrouter plus OpenRouter API Key."
+				: "OPENAI_API_KEY is not set. Run `bunnai config` and set OpenAI API Key or switch Provider to openrouter.",
 		);
 		process.exit(1);
 	}

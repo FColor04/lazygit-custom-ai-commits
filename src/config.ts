@@ -212,16 +212,37 @@ export async function showConfigUI() {
 
 			await setConfigs([["OPENROUTER_API_KEY", apiKey as string]]);
 		} else if (choice === "model") {
-			const model = await p.select({
-				message: "Model",
-				options: (await getModels(config.provider)).map((model) => ({
-					label: model,
-					value: model,
-				})),
+			let suggestedModels: string[] = [];
+			try {
+				suggestedModels = await getModels(config.provider);
+			} catch (error) {
+				const message =
+					error instanceof Error ? error.message : "Failed to fetch models";
+				console.log(
+					`Could not fetch ${config.provider} models automatically: ${message}`,
+				);
+			}
+
+			if (suggestedModels.length > 0) {
+				console.log(
+					`Suggested ${config.provider} models (first 20): ${suggestedModels
+						.slice(0, 20)
+						.join(", ")}`,
+				);
+			}
+
+			const modelInput = await p.text({
+				message: `Model (${config.provider})`,
 				initialValue: config.model,
+				placeholder:
+					config.provider === "openrouter"
+						? "e.g. deepseek/deepseek-chat-v3-0324:free"
+						: "e.g. gpt-4.1-mini",
 			});
 
-			await setConfigs([["model", model as string]]);
+			if (!p.isCancel(modelInput) && typeof modelInput === "string") {
+				await setConfigs([["model", modelInput]]);
+			}
 		} else if (choice === "template") {
 			const templateChoice = (await p.select({
 				message: "Choose a template to edit",

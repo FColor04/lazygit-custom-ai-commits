@@ -12,7 +12,7 @@ then you can select a commit message from the list and use it to commit your cha
 ## installation
 
 ```sh
-bun install -g @chhoumann/bunnai
+bun install -g @fcolor04/bunnai
 ```
 
 set up with your provider, api key, and preferred model:
@@ -35,11 +35,11 @@ powershell -c "irm bun.sh/install.ps1 | iex"
 2. ensure Bun is in `PATH` (usually `C:\Users\<you>\.bun\bin`).
 3. install bunnai globally (pick one):
 ```bat
-bun install -g @chhoumann/bunnai
+bun install -g @fcolor04/bunnai
 ```
 or
 ```bat
-npm install -g @chhoumann/bunnai
+npm install -g @fcolor04/bunnai
 ```
 4. ensure npm global bin is in `PATH` when using npm install (usually `%AppData%\npm`).
 5. verify:
@@ -51,6 +51,62 @@ if `bunnai` is not found in a new terminal, add these to user `PATH` and reopen 
 
 ```bat
 setx PATH "%PATH%;%USERPROFILE%\.bun\bin;%AppData%\npm"
+```
+
+debug commands:
+
+```bat
+where bun
+where bunnai
+bun pm bin -g
+```
+
+### local fork testing (before publish)
+
+from the repo root:
+
+```bat
+bun install
+bun run build
+bun link
+```
+
+then in a new terminal:
+
+```bat
+bunnai --help
+```
+
+to remove the link later:
+
+```bat
+bun unlink
+```
+
+### publish this fork (@fcolor04/bunnai)
+
+1. authenticate with npm registry (required by `bun publish`):
+
+```bat
+bunx npm login
+```
+
+2. bump version:
+
+```bat
+bunx bumpp
+```
+
+3. publish:
+
+```bat
+bun publish
+```
+
+if this is the first publish for the scoped package, ensure it is public:
+
+```bat
+bun publish --access public
 ```
 
 ## usage
