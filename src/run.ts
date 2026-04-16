@@ -7,6 +7,151 @@ interface RunOptions {
 	verbose?: boolean;
 }
 
+const MAX_DIFF_CHARS = 32000;
+const MAX_CHANGED_CONTEXT_LINES = 220;
+const MAX_CHANGED_CONTEXT_CHARS = 12000;
+const CHANGED_LINE_CONTEXT_RADIUS = 2;
+
+function truncateWithNotice(input: string, maxChars: number, label: string) {
+	if (input.length <= maxChars) {
+		return input;
+	}
+
+	const omitted = input.length - maxChars;
+	return `${input.slice(0, maxChars)}\n\n[${label}; omitted ${omitted} chars]`;
+}
+
+function isActualChangeLine(line: string) {
+	if (line.startsWith("+++ ") || line.startsWith("--- ")) {
+		return false;
+	}
+
+	return line.startsWith("+") || line.startsWith("-");
+}
+
+function extractChangedLinesContext(diff: string) {
+	const lines = diff.split("\n");
+	const output: string[] = [];
+
+	let currentFileHeader: string[] = [];
+	let fileHeaderEmitted = false;
+	let pendingLeadingContext: string[] = [];
+	let remainingTrailingContext = 0;
+
+	const canAppend = (line: string) => {
+		const projectedChars =
+			output.reduce((sum, item) => sum + item.length + 1, 0) + line.length + 1;
+		return (
+			output.length < MAX_CHANGED_CONTEXT_LINES &&
+			projectedChars <= MAX_CHANGED_CONTEXT_CHARS
+		);
+	};
+
+	const append = (line: string) => {
+		if (!canAppend(line)) {
+			return false;
+		}
+		output.push(line);
+		return true;
+	};
+
+	const emitFileHeaderIfNeeded = () => {
+		if (fileHeaderEmitted) {
+			return;
+		}
+
+		for (const headerLine of currentFileHeader) {
+			if (!append(headerLine)) {
+				return;
+			}
+		}
+		fileHeaderEmitted = true;
+	};
+
+	for (const line of lines) {
+		if (line.startsWith("diff --git ")) {
+			currentFileHeader = [line];
+			fileHeaderEmitted = false;
+			pendingLeadingContext = [];
+			remainingTrailingContext = 0;
+			continue;
+		}
+
+		if (
+			currentFileHeader.length > 0 &&
+			(line.startsWith("index ") ||
+				line.startsWith("--- ") ||
+				line.startsWith("+++ ") ||
+				line.startsWith("new file mode ") ||
+				line.startsWith("deleted file mode "))
+		) {
+			currentFileHeader.push(line);
+			continue;
+		}
+
+		if (line.startsWith("@@")) {
+			emitFileHeaderIfNeeded();
+			if (!append(line)) {
+				break;
+			}
+			pendingLeadingContext = [];
+			remainingTrailingContext = 0;
+			continue;
+		}
+
+		if (isActualChangeLine(line)) {
+			emitFileHeaderIfNeeded();
+
+			for (const contextLine of pendingLeadingContext) {
+				if (!append(contextLine)) {
+					break;
+				}
+			}
+			pendingLeadingContext = [];
+
+			if (!append(line)) {
+				break;
+			}
+			remainingTrailingContext = CHANGED_LINE_CONTEXT_RADIUS;
+			continue;
+		}
+
+		if (line.startsWith(" ")) {
+			if (remainingTrailingContext > 0) {
+				if (!append(line)) {
+					break;
+				}
+				remainingTrailingContext -= 1;
+			} else {
+				pendingLeadingContext.push(line);
+				if (pendingLeadingContext.length > CHANGED_LINE_CONTEXT_RADIUS) {
+					pendingLeadingContext.shift();
+				}
+			}
+			continue;
+		}
+
+		if (line.startsWith("\\ No newline at end of file")) {
+			if (remainingTrailingContext > 0) {
+				if (!append(line)) {
+					break;
+				}
+				remainingTrailingContext -= 1;
+			}
+		}
+	}
+
+	if (output.length === 0) {
+		return "(no focused changed-line context available)";
+	}
+
+	return truncateWithNotice(
+		output.join("\n"),
+		MAX_CHANGED_CONTEXT_CHARS,
+		"changed-line context truncated",
+	);
+}
+
 async function getStagedDiff(target_dir: string) {
 	try {
 		const git = simpleGit(target_dir);
@@ -65,13 +210,23 @@ export async function run(options: RunOptions, templateName?: string) {
 		console.debug(`Target directory: ${target_dir}`);
 	}
 
-	if (!config.OPENAI_API_KEY) {
-		console.error("OPENAI_API_KEY is not set");
+	if (!config.model) {
+		console.error("Model is not set");
 		process.exit(1);
 	}
 
-	if (!config.model) {
-		console.error("Model is not set");
+	const provider = config.provider ?? "openai";
+	const apiKey =
+		provider === "openrouter"
+			? config.OPENROUTER_API_KEY
+			: config.OPENAI_API_KEY;
+
+	if (!apiKey) {
+		console.error(
+			provider === "openrouter"
+				? "OPENROUTER_API_KEY is not set"
+				: "OPENAI_API_KEY is not set",
+		);
 		process.exit(1);
 	}
 
@@ -85,25 +240,43 @@ export async function run(options: RunOptions, templateName?: string) {
 		process.exit(1);
 	}
 
-	const rendered_template = template.replace("{{diff}}", diff);
+	const trimmedDiff = truncateWithNotice(
+		diff,
+		MAX_DIFF_CHARS,
+		"diff truncated",
+	);
+	const changedContext = extractChangedLinesContext(diff);
+
+	let rendered_template = template
+		.replace("{{diff}}", trimmedDiff)
+		.replace("{{changed_context}}", changedContext);
+	if (!template.includes("{{changed_context}}")) {
+		rendered_template = `${rendered_template}
+
+Additional bounded changed-line context (with nearby lines):
+${changedContext}`;
+	}
 	if (options.verbose) {
 		console.debug("Template rendered with git diff.");
 	}
 
 	const oai = new OpenAI({
-		apiKey: config.OPENAI_API_KEY,
+		apiKey,
+		...(provider === "openrouter"
+			? { baseURL: "https://openrouter.ai/api/v1" }
+			: {}),
 	});
 
 	try {
 		if (options.verbose) {
-			console.debug("Sending request to OpenAI...");
+			console.debug(`Sending request to ${provider}...`);
 		}
 		const response = await oai.chat.completions.create({
 			messages: [
 				{
 					role: "system",
 					content:
-						"You are a commit message generator. I will provide you with a git diff, and I would like you to generate an appropriate commit message using the conventional commit format. Do not write any explanations or other words, just reply with the commit message.",
+						"You generate commit message candidates from staged git changes. You will receive a full diff (sometimes truncated) and an additional bounded context excerpt centered on actual changed lines. Use both, prioritize the changed-line context when they conflict, infer intent at a higher level, and output exactly 10 single-line conventional commit candidates numbered 1..10 like `1. feat(scope): description`. Keep each line concise and actionable. Return only the numbered list with no extra prose.",
 				},
 				{
 					role: "user",
@@ -114,7 +287,7 @@ export async function run(options: RunOptions, templateName?: string) {
 		});
 
 		if (options.verbose) {
-			console.debug("Response received from OpenAI.");
+			console.debug(`Response received from ${provider}.`);
 			console.debug(JSON.stringify(response, null, 2));
 		}
 
@@ -129,7 +302,7 @@ export async function run(options: RunOptions, templateName?: string) {
 			console.debug("Commit message generated and outputted.");
 		}
 	} catch (error) {
-		console.error(`Failed to fetch from openai: ${error}`);
+		console.error(`Failed to fetch from ${provider}: ${error}`);
 		process.exit(1);
 	}
 }

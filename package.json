@@ -19,11 +19,12 @@
     "typescript": "^5.0.0"
   },
   "bin": {
-    "bunnai": "dist/index.js"
+    "bunnai": "bin/bunnai.js"
   },
   "bugs": "https://github.com/chhoumann/bunnai/issues",
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ],
   "homepage": "https://bagerbach.com",
   "license": "MIT",

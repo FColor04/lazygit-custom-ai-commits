@@ -5,6 +5,8 @@ import OpenAI from "openai";
 import { spawn } from "child_process";
 import { template } from "./template";
 
+export type Provider = "openai" | "openrouter";
+
 async function editFile(filePath: string, onExit: () => void) {
 	let editor =
 		process.env.EDITOR ||
@@ -62,13 +64,17 @@ function hasOwn<T extends object, K extends PropertyKey>(
 export const configPath = path.join(os.homedir(), ".bunnai");
 
 export interface Config {
+	provider: Provider;
 	OPENAI_API_KEY: string;
+	OPENROUTER_API_KEY: string;
 	model: string;
 	templates: Record<string, string>;
 }
 
 const DEFAULT_CONFIG: Config = {
+	provider: "openai",
 	OPENAI_API_KEY: "",
+	OPENROUTER_API_KEY: "",
 	model: "gpt-4-0125-preview",
 	templates: {
 		default: path.join(os.homedir(), ".bunnai-template"),
@@ -134,10 +140,22 @@ export async function showConfigUI() {
 			message: "set config",
 			options: [
 				{
+					label: "Provider",
+					value: "provider",
+					hint: config.provider,
+				},
+				{
 					label: "OpenAI API Key",
 					value: "OPENAI_API_KEY",
 					hint: hasOwn<Config, keyof Config>(config, "OPENAI_API_KEY")
-						? `sk-...${config.OPENAI_API_KEY.slice(-3)}`
+						? maskKey(config.OPENAI_API_KEY, "sk-")
+						: "not set",
+				},
+				{
+					label: "OpenRouter API Key",
+					value: "OPENROUTER_API_KEY",
+					hint: hasOwn<Config, keyof Config>(config, "OPENROUTER_API_KEY")
+						? maskKey(config.OPENROUTER_API_KEY, "sk-or-")
 						: "not set",
 				},
 				{
@@ -162,17 +180,41 @@ export async function showConfigUI() {
 			return;
 		}
 
-		if (choice === "OPENAI_API_KEY") {
+		if (choice === "provider") {
+			const provider = await p.select({
+				message: "Provider",
+				options: [
+					{
+						label: "OpenAI",
+						value: "openai",
+					},
+					{
+						label: "OpenRouter (free models)",
+						value: "openrouter",
+					},
+				],
+				initialValue: config.provider,
+			});
+
+			await setConfigs([["provider", provider as Provider]]);
+		} else if (choice === "OPENAI_API_KEY") {
 			const apiKey = await p.text({
 				message: "OpenAI API Key",
 				initialValue: config.OPENAI_API_KEY,
 			});
 
 			await setConfigs([["OPENAI_API_KEY", apiKey as string]]);
+		} else if (choice === "OPENROUTER_API_KEY") {
+			const apiKey = await p.text({
+				message: "OpenRouter API Key",
+				initialValue: config.OPENROUTER_API_KEY,
+			});
+
+			await setConfigs([["OPENROUTER_API_KEY", apiKey as string]]);
 		} else if (choice === "model") {
 			const model = await p.select({
 				message: "Model",
-				options: (await getModels()).map((model) => ({
+				options: (await getModels(config.provider)).map((model) => ({
 					label: model,
 					value: model,
 				})),
@@ -234,15 +276,72 @@ export async function showConfigUI() {
 	}
 }
 
-async function getModels() {
-	const apiKey = (await readConfigFile()).OPENAI_API_KEY;
+function maskKey(value: string, prefix: string) {
+	if (!value) {
+		return "not set";
+	}
 
-	if (!apiKey) {
+	return `${prefix}...${value.slice(-3)}`;
+}
+
+interface OpenRouterModel {
+	id: string;
+	pricing?: {
+		prompt?: string;
+		completion?: string;
+	};
+}
+
+interface OpenRouterModelsResponse {
+	data?: OpenRouterModel[];
+}
+
+async function getModels(provider: Provider) {
+	const config = await readConfigFile();
+
+	if (provider === "openrouter") {
+		if (!config.OPENROUTER_API_KEY) {
+			throw new Error("OPENROUTER_API_KEY is not set");
+		}
+
+		const response = await fetch("https://openrouter.ai/api/v1/models", {
+			headers: {
+				Authorization: `Bearer ${config.OPENROUTER_API_KEY}`,
+			},
+		});
+
+		if (!response.ok) {
+			throw new Error(
+				`Failed to fetch OpenRouter models: ${response.status} ${response.statusText}`,
+			);
+		}
+
+		const body = (await response.json()) as OpenRouterModelsResponse;
+		const freeModels = (body.data ?? [])
+			.filter((model) => {
+				const promptPrice = Number(model.pricing?.prompt ?? "1");
+				const completionPrice = Number(model.pricing?.completion ?? "1");
+				return (
+					model.id.endsWith(":free") ||
+					(promptPrice === 0 && completionPrice === 0)
+				);
+			})
+			.map((model) => model.id)
+			.sort((a, b) => a.localeCompare(b));
+
+		if (freeModels.length === 0) {
+			throw new Error("No free OpenRouter models found");
+		}
+
+		return freeModels;
+	}
+
+	if (!config.OPENAI_API_KEY) {
 		throw new Error("OPENAI_API_KEY is not set");
 	}
 
 	const oai = new OpenAI({
-		apiKey,
+		apiKey: config.OPENAI_API_KEY,
 	});
 
 	const models = await oai.models.list();

@@ -5,6 +5,12 @@ Please suggest 10 commit messages, given the following diff:
 {{diff}}
 \`\`\`
 
+Changed-line context excerpt (bounded, with nearby lines):
+
+\`\`\`diff
+{{changed_context}}
+\`\`\`
+
 **Criteria:**
 
 1. **Format:** Each commit message must follow the conventional commits format, which is \`<type>: <description>\`.
