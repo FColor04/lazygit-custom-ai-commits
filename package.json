@@ -1,7 +1,7 @@
 {
   "name": "@fcolor04/bunnai",
   "description": "let ai write commit messages for you",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "author": "Christian Bager Bach Houmann <christian@bagerbach.com>",
   "publishConfig": {
     "access": "public"
